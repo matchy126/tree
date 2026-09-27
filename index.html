@@ -26,21 +26,29 @@
   #enterARBtn,#enterDesktopBtn{background:transparent;color:var(--gold);border:1.5px solid var(--gold);}
   #enterBtn:active,#enterARBtn:active,#enterDesktopBtn:active{transform:scale(0.97);}
   #note{font-size:12.5px;color:#7f8ba0;max-width:300px;}
+  #colorPicker{position:fixed;left:0;right:0;bottom:calc(22px + env(safe-area-inset-bottom,0px));display:none;
+               gap:12px;justify-content:center;pointer-events:auto;z-index:6;flex-wrap:wrap;padding:0 16px;}
+  .swatch{width:44px;height:44px;border-radius:50%;border:3px solid rgba(255,255,255,0.75);cursor:pointer;}
+  .swatch:active{transform:scale(0.88);}
+  #hint{position:fixed;left:0;right:0;bottom:calc(22px + env(safe-area-inset-bottom,0px));text-align:center;
+        font-size:13px;color:#b9c2d0;pointer-events:none;z-index:4;}
 </style>
 </head>
 <body>
 <div id="hud">
-  <div id="score">飾った数 <b id="scoreVal">0</b> / <span id="totalVal">24</span></div>
+  <div id="score">飾った数 <b id="scoreVal">0</b></div>
 </div>
+<div id="colorPicker"></div>
+<div id="hint" style="display:none;">画面をタップすると飾りが出現します</div>
 <div id="intro">
   <h1>🎄 ツリー・デコレーター</h1>
-  <p>手元の飾りをつかんで、大きなクリスマスツリーに投げて飾ろう。</p>
+  <p>画面をタップして飾りを出し、色を選んでツリーに投げよう。</p>
   <div id="btnRow">
     <button id="enterBtn">Meta Questで始める(VR)</button>
     <button id="enterARBtn">ARで始める(スマホ/Quest)</button>
     <button id="enterDesktopBtn">ブラウザで始める</button>
   </div>
-  <p id="note">VR: コントローラーのトリガーでつかむ&投げる。<br>AR: 床を認識したら合図(タップ/トリガー)でツリーを固定。飾りは常に手元に浮かんでいます。<br>ブラウザ: 飾りをドラッグして、離した瞬間の動きで投げる。</p>
+  <p id="note">タップ/トリガーで飾りを出現 → 色を選ぶ → もう一度つかんでドラッグ、離すと投げられます。<br>AR: 床を認識したらタップでツリーを固定してから遊べます。</p>
 </div>
 
 <script type="importmap">
@@ -49,11 +57,9 @@
 <script type="module">
 import * as THREE from "three";
 
-const ORNAMENT_COUNT = 24;
 const TREE = { baseX: 0, baseY: 0, baseZ: -8, height: 13, baseRadius: 4.5 };
-const ORN_RADIUS = 0.11;
+const ORN_RADIUS = 0.14;
 let score = 0;
-document.getElementById('totalVal').textContent = ORNAMENT_COUNT;
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x0a0e1a);
@@ -112,28 +118,49 @@ const star = new THREE.Mesh(
 star.position.y = TREE.height + 0.1;
 treeGroup.add(star);
 
-// ornament rack that always floats near the player's hand
+// ornaments are spawned on demand, one at a time
 const colors = [0xd94b4b,0x4b8dd9,0xe8b44a,0x8a4bd9,0xd94ba0,0x4bd98d];
 const ornaments = [];
-const rackCols = 6;
 const geo = new THREE.SphereGeometry(ORN_RADIUS, 16, 16);
-for (let i=0; i<ORNAMENT_COUNT; i++){
-  const mat = new THREE.MeshStandardMaterial({ color: colors[i%colors.length], roughness:0.25, metalness:0.4 });
-  const m = new THREE.Mesh(geo, mat);
-  const col = i % rackCols, row = Math.floor(i/rackCols);
-  m.userData = {
-    held:false, stuck:false, inRack:true, velocity:new THREE.Vector3(), history:[], settleTimer:0,
-    slot: { x:(col-rackCols/2+0.5)*0.09, y:0.05+row*0.09 }
-  };
-  scene.add(m);
-  ornaments.push(m);
-}
+let activeOrnament = null;
+let awaitingColor = false;
+
+const pickerDiv = document.getElementById('colorPicker');
+colors.forEach(c=>{
+  const b = document.createElement('button');
+  b.className = 'swatch';
+  b.style.background = '#'+c.toString(16).padStart(6,'0');
+  b.addEventListener('click', ()=>chooseColor(c));
+  pickerDiv.appendChild(b);
+});
+
 function computeHandAnchor(){
   const forward = new THREE.Vector3();
   camera.getWorldDirection(forward);
   forward.y = 0;
   if (forward.lengthSq() < 1e-6) forward.set(0,0,-1); else forward.normalize();
   return camera.position.clone().addScaledVector(forward, 0.55).add(new THREE.Vector3(0,-0.35,0));
+}
+
+function spawnOrnament(){
+  if (activeOrnament) return;
+  const mat = new THREE.MeshStandardMaterial({ color:0xffffff, roughness:0.25, metalness:0.4 });
+  const m = new THREE.Mesh(geo, mat);
+  m.position.copy(computeHandAnchor());
+  m.userData = { held:false, stuck:false, floating:true, velocity:new THREE.Vector3(), history:[], settleTimer:0 };
+  scene.add(m);
+  ornaments.push(m);
+  activeOrnament = m;
+  awaitingColor = true;
+  pickerDiv.style.display = 'flex';
+  document.getElementById('hint').style.display = 'none';
+}
+
+function chooseColor(hex){
+  if (!activeOrnament) return;
+  activeOrnament.material.color.setHex(hex);
+  awaitingColor = false;
+  pickerDiv.style.display = 'none';
 }
 
 // AR surface placement
@@ -154,27 +181,11 @@ function placeTreeAt(pos){
   treeGroup.visible = true;
   treePlaced = true;
   reticle.visible = false;
+  const hint = document.getElementById('hint');
+  hint.textContent = 'トリガーで飾りが出現します';
+  hint.style.display = 'block';
 }
 
-function grabNearest(controller){
-  const cp = new THREE.Vector3();
-  controller.getWorldPosition(cp);
-  let best=null, bestD=0.35;
-  for (const o of ornaments){
-    if (o.userData.held || o.userData.stuck) continue;
-    const op = new THREE.Vector3();
-    o.getWorldPosition(op);
-    const d = op.distanceTo(cp);
-    if (d < bestD){ bestD=d; best=o; }
-  }
-  if (best){
-    best.userData.held = true;
-    best.userData.inRack = false;
-    best.userData.settleTimer = 0;
-    best.userData.history = [];
-    controller.attach(best);
-  }
-}
 function releaseHeld(controller){
   for (const o of ornaments){
     if (o.userData.held && o.parent === controller){
@@ -188,6 +199,7 @@ function releaseHeld(controller){
         if (dt > 0.001) vel = b.p.clone().sub(a.p).divideScalar(dt).multiplyScalar(1.4);
       }
       o.userData.velocity.copy(vel);
+      if (o === activeOrnament) activeOrnament = null;
     }
   }
 }
@@ -202,7 +214,14 @@ function onSelectStart(c){
     }
     return;
   }
-  grabNearest(c);
+  if (awaitingColor) return;
+  if (!activeOrnament){ spawnOrnament(); return; }
+  if (!activeOrnament.userData.held){
+    activeOrnament.userData.held = true;
+    activeOrnament.userData.floating = false;
+    activeOrnament.userData.history = [];
+    c.attach(activeOrnament);
+  }
 }
 const controllers = [0,1].map(i=>{
   const c = renderer.xr.getController(i);
@@ -254,16 +273,12 @@ function ndcFromEvent(e){
 }
 
 renderer.domElement.addEventListener('pointerdown', (e)=>{
-  if (!desktopMode || draggedOrnament) return;
-  ndcFromEvent(e);
-  raycaster.setFromCamera(ndc, camera);
-  const targets = ornaments.filter(o=>!o.userData.held && !o.userData.stuck);
-  const hits = raycaster.intersectObjects(targets);
-  if (hits.length){
-    draggedOrnament = hits[0].object;
+  if (!desktopMode || draggedOrnament || awaitingColor) return;
+  if (!activeOrnament){ spawnOrnament(); return; }
+  if (!activeOrnament.userData.held){
+    draggedOrnament = activeOrnament;
     draggedOrnament.userData.held = true;
-    draggedOrnament.userData.inRack = false;
-    draggedOrnament.userData.settleTimer = 0;
+    draggedOrnament.userData.floating = false;
     draggedOrnament.userData.history = [];
   }
 });
@@ -300,12 +315,14 @@ addEventListener('pointerup', ()=>{
     if (dt > 0.001) vel = b.p.clone().sub(a.p).divideScalar(dt).multiplyScalar(1.4);
   }
   draggedOrnament.userData.velocity.copy(vel);
+  if (draggedOrnament === activeOrnament) activeOrnament = null;
   draggedOrnament = null;
 });
 
 document.getElementById('enterDesktopBtn').addEventListener('click', ()=>{
   desktopMode = true;
   document.getElementById('intro').style.display = 'none';
+  document.getElementById('hint').style.display = 'block';
 });
 
 const GRAVITY = -9.8;
@@ -338,7 +355,8 @@ function tick(time, frame){
   }
 
   const anchor = computeHandAnchor();
-  for (const o of ornaments){
+  for (let idx = ornaments.length - 1; idx >= 0; idx--){
+    const o = ornaments[idx];
     if (o.userData.held){
       const p = new THREE.Vector3();
       o.getWorldPosition(p);
@@ -347,8 +365,8 @@ function tick(time, frame){
       continue;
     }
     if (o.userData.stuck) continue;
-    if (o.userData.inRack){
-      o.position.set(anchor.x + o.userData.slot.x, anchor.y + o.userData.slot.y, anchor.z);
+    if (o.userData.floating){
+      o.position.copy(anchor);
       continue;
     }
     o.userData.velocity.y += GRAVITY*dt;
@@ -361,9 +379,9 @@ function tick(time, frame){
       if (o.userData.velocity.length() < 0.15){
         o.userData.settleTimer += dt;
         if (o.userData.settleTimer > 0.6){
-          o.userData.inRack = true;
-          o.userData.velocity.set(0,0,0);
-          o.userData.settleTimer = 0;
+          scene.remove(o);
+          o.material.dispose();
+          ornaments.splice(idx, 1);
         }
       } else {
         o.userData.settleTimer = 0;
@@ -409,6 +427,9 @@ document.getElementById('enterBtn').addEventListener('click', async ()=>{
     treeGroup.visible = true;
     await renderer.xr.setSession(session);
     document.getElementById('intro').style.display = 'none';
+    const hint = document.getElementById('hint');
+    hint.textContent = 'トリガーで飾りが出現します';
+    hint.style.display = 'block';
     session.addEventListener('end', ()=>{ xrMode = null; document.getElementById('intro').style.display = 'flex'; });
   }catch(e){
     alert('VRセッションを開始できませんでした: ' + e.message);
@@ -433,6 +454,9 @@ document.getElementById('enterARBtn').addEventListener('click', async ()=>{
     hitTestAvailable = false;
     await renderer.xr.setSession(session);
     document.getElementById('intro').style.display = 'none';
+    const hint = document.getElementById('hint');
+    hint.textContent = '床にリングが出たらタップ/トリガーでツリーを固定';
+    hint.style.display = 'block';
     session.addEventListener('end', ()=>{
       xrMode = null;
       treeGroup.position.set(TREE.baseX, TREE.baseY, TREE.baseZ);
