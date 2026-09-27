@@ -40,7 +40,7 @@
     <button id="enterARBtn">ARで始める(スマホ/Quest)</button>
     <button id="enterDesktopBtn">ブラウザで始める</button>
   </div>
-  <p id="note">VR: コントローラーのトリガーでつかむ&投げる。<br>AR: 現実空間に重ねてツリーを表示、指先/コントローラーで操作。<br>ブラウザ: 飾りをドラッグして、離した瞬間の動きで投げる。</p>
+  <p id="note">VR: コントローラーのトリガーでつかむ&投げる。<br>AR: 床を認識したら合図(タップ/トリガー)でツリーを固定。飾りは常に手元に浮かんでいます。<br>ブラウザ: 飾りをドラッグして、離した瞬間の動きで投げる。</p>
 </div>
 
 <script type="importmap">
@@ -112,28 +112,50 @@ const star = new THREE.Mesh(
 star.position.y = TREE.height + 0.1;
 treeGroup.add(star);
 
-// ornament rack near spawn
+// ornament rack that always floats near the player's hand
 const colors = [0xd94b4b,0x4b8dd9,0xe8b44a,0x8a4bd9,0xd94ba0,0x4bd98d];
 const ornaments = [];
-const rackCols = 6, rackRows = Math.ceil(ORNAMENT_COUNT/rackCols);
+const rackCols = 6;
 const geo = new THREE.SphereGeometry(ORN_RADIUS, 16, 16);
 for (let i=0; i<ORNAMENT_COUNT; i++){
   const mat = new THREE.MeshStandardMaterial({ color: colors[i%colors.length], roughness:0.25, metalness:0.4 });
   const m = new THREE.Mesh(geo, mat);
   const col = i % rackCols, row = Math.floor(i/rackCols);
-  m.position.set((col-rackCols/2+0.5)*0.28, 0.9 + row*0.28, 1.2 - row*0.15);
-  m.userData = { held:false, stuck:false, velocity:new THREE.Vector3(), history:[] };
+  m.userData = {
+    held:false, stuck:false, inRack:true, velocity:new THREE.Vector3(), history:[], settleTimer:0,
+    slot: { x:(col-rackCols/2+0.5)*0.09, y:0.05+row*0.09 }
+  };
   scene.add(m);
   ornaments.push(m);
 }
-const table = new THREE.Mesh(
-  new THREE.BoxGeometry(2.2, 0.06, 0.9),
-  new THREE.MeshStandardMaterial({ color:0x2a1c12, roughness:0.9 })
-);
-table.position.set(0, 0.82, 1.0);
-scene.add(table);
+function computeHandAnchor(){
+  const forward = new THREE.Vector3();
+  camera.getWorldDirection(forward);
+  forward.y = 0;
+  if (forward.lengthSq() < 1e-6) forward.set(0,0,-1); else forward.normalize();
+  return camera.position.clone().addScaledVector(forward, 0.55).add(new THREE.Vector3(0,-0.35,0));
+}
 
-// controllers
+// AR surface placement
+let xrMode = null; // 'vr' | 'ar' | null
+let treePlaced = true;
+let hitTestSource = null;
+let hitTestSourceRequested = false;
+let hitTestAvailable = false;
+const reticle = new THREE.Mesh(
+  new THREE.RingGeometry(0.15, 0.2, 32).rotateX(-Math.PI/2),
+  new THREE.MeshBasicMaterial({ color:0xe8b44a, transparent:true, opacity:0.85, side:THREE.DoubleSide })
+);
+reticle.visible = false;
+scene.add(reticle);
+
+function placeTreeAt(pos){
+  treeGroup.position.copy(pos);
+  treeGroup.visible = true;
+  treePlaced = true;
+  reticle.visible = false;
+}
+
 function grabNearest(controller){
   const cp = new THREE.Vector3();
   controller.getWorldPosition(cp);
@@ -147,6 +169,8 @@ function grabNearest(controller){
   }
   if (best){
     best.userData.held = true;
+    best.userData.inRack = false;
+    best.userData.settleTimer = 0;
     best.userData.history = [];
     controller.attach(best);
   }
@@ -167,9 +191,22 @@ function releaseHeld(controller){
     }
   }
 }
+function onSelectStart(c){
+  if (xrMode === 'ar' && !treePlaced){
+    if (reticle.visible){ placeTreeAt(reticle.position); return; }
+    if (!hitTestAvailable){
+      const forward = new THREE.Vector3();
+      camera.getWorldDirection(forward);
+      forward.y = 0; forward.normalize();
+      placeTreeAt(camera.position.clone().addScaledVector(forward, 3).setY(0));
+    }
+    return;
+  }
+  grabNearest(c);
+}
 const controllers = [0,1].map(i=>{
   const c = renderer.xr.getController(i);
-  c.addEventListener('selectstart', ()=>grabNearest(c));
+  c.addEventListener('selectstart', ()=>onSelectStart(c));
   c.addEventListener('selectend', ()=>releaseHeld(c));
   scene.add(c);
   const tip = new THREE.Mesh(new THREE.SphereGeometry(0.02,8,8), new THREE.MeshBasicMaterial({color:0xffffff}));
@@ -225,6 +262,8 @@ renderer.domElement.addEventListener('pointerdown', (e)=>{
   if (hits.length){
     draggedOrnament = hits[0].object;
     draggedOrnament.userData.held = true;
+    draggedOrnament.userData.inRack = false;
+    draggedOrnament.userData.settleTimer = 0;
     draggedOrnament.userData.history = [];
   }
 });
@@ -271,8 +310,34 @@ document.getElementById('enterDesktopBtn').addEventListener('click', ()=>{
 
 const GRAVITY = -9.8;
 const clock = new THREE.Clock();
-function tick(){
+function tick(time, frame){
   const dt = Math.min(clock.getDelta(), 0.05);
+
+  if (xrMode === 'ar' && frame){
+    const session = renderer.xr.getSession();
+    if (!hitTestSourceRequested){
+      hitTestSourceRequested = true;
+      session.requestReferenceSpace('viewer').then(viewerSpace=>{
+        session.requestHitTestSource({ space: viewerSpace }).then(source=>{
+          hitTestSource = source;
+          hitTestAvailable = true;
+        }).catch(()=>{ hitTestAvailable = false; });
+      }).catch(()=>{ hitTestAvailable = false; });
+    }
+    if (hitTestSource && !treePlaced){
+      const refSpace = renderer.xr.getReferenceSpace();
+      const results = frame.getHitTestResults(hitTestSource);
+      if (results.length){
+        const pose = results[0].getPose(refSpace);
+        reticle.visible = true;
+        reticle.position.set(pose.transform.position.x, pose.transform.position.y, pose.transform.position.z);
+      } else {
+        reticle.visible = false;
+      }
+    }
+  }
+
+  const anchor = computeHandAnchor();
   for (const o of ornaments){
     if (o.userData.held){
       const p = new THREE.Vector3();
@@ -282,6 +347,10 @@ function tick(){
       continue;
     }
     if (o.userData.stuck) continue;
+    if (o.userData.inRack){
+      o.position.set(anchor.x + o.userData.slot.x, anchor.y + o.userData.slot.y, anchor.z);
+      continue;
+    }
     o.userData.velocity.y += GRAVITY*dt;
     o.position.addScaledVector(o.userData.velocity, dt);
     if (checkTreeCollision(o)) continue;
@@ -289,6 +358,16 @@ function tick(){
       o.position.y = ORN_RADIUS;
       o.userData.velocity.multiplyScalar(0.25);
       o.userData.velocity.y *= -0.3;
+      if (o.userData.velocity.length() < 0.15){
+        o.userData.settleTimer += dt;
+        if (o.userData.settleTimer > 0.6){
+          o.userData.inRack = true;
+          o.userData.velocity.set(0,0,0);
+          o.userData.settleTimer = 0;
+        }
+      } else {
+        o.userData.settleTimer = 0;
+      }
     }
   }
   renderer.render(scene, camera);
@@ -325,9 +404,12 @@ document.getElementById('enterBtn').addEventListener('click', async ()=>{
       optionalFeatures: ['local-floor','bounded-floor','dom-overlay'],
       domOverlay: { root: document.body }
     });
+    xrMode = 'vr';
+    treePlaced = true;
+    treeGroup.visible = true;
     await renderer.xr.setSession(session);
     document.getElementById('intro').style.display = 'none';
-    session.addEventListener('end', ()=>{ document.getElementById('intro').style.display = 'flex'; });
+    session.addEventListener('end', ()=>{ xrMode = null; document.getElementById('intro').style.display = 'flex'; });
   }catch(e){
     alert('VRセッションを開始できませんでした: ' + e.message);
   }
@@ -343,9 +425,17 @@ document.getElementById('enterARBtn').addEventListener('click', async ()=>{
       domOverlay: { root: document.body }
     });
     enterPassthroughVisuals();
+    xrMode = 'ar';
+    treePlaced = false;
+    treeGroup.visible = false;
+    hitTestSource = null;
+    hitTestSourceRequested = false;
+    hitTestAvailable = false;
     await renderer.xr.setSession(session);
     document.getElementById('intro').style.display = 'none';
     session.addEventListener('end', ()=>{
+      xrMode = null;
+      treeGroup.position.set(TREE.baseX, TREE.baseY, TREE.baseZ);
       exitPassthroughVisuals();
       document.getElementById('intro').style.display = 'flex';
     });
