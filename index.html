@@ -1,0 +1,359 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>ツリー・デコレーター</title>
+<style>
+  :root{
+    --bg:#0a0e1a; --panel:rgba(10,14,26,0.82); --gold:#e8b44a; --snow:#eef2f7; --pine:#1f4d3a;
+    box-sizing:border-box; padding-top:env(safe-area-inset-top,0px); padding-bottom:env(safe-area-inset-bottom,0px);
+  }
+  html,body{height:100%;margin:0;overflow:hidden;background:var(--bg);font-family:-apple-system,"Hiragino Sans",sans-serif;color:var(--snow);}
+  canvas{display:block;touch-action:none;}
+  #hud{position:fixed;top:env(safe-area-inset-top,0px);left:0;right:0;display:flex;justify-content:space-between;
+       align-items:flex-start;padding:14px 18px;pointer-events:none;}
+  #score{background:var(--panel);border:1px solid rgba(232,180,74,0.35);border-radius:10px;padding:10px 16px;
+         font-size:15px;letter-spacing:0.02em;}
+  #score b{color:var(--gold);font-size:20px;}
+  #intro{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;
+         gap:18px;background:radial-gradient(circle at 50% 30%,#12203a,var(--bg));text-align:center;padding:24px;z-index:10;}
+  #intro h1{font-size:26px;margin:0;font-weight:600;color:var(--snow);}
+  #intro p{max-width:340px;line-height:1.7;color:#b9c2d0;font-size:14.5px;margin:0;}
+  #btnRow{display:flex;gap:12px;flex-wrap:wrap;justify-content:center;}
+  #enterBtn,#enterARBtn,#enterDesktopBtn{pointer-events:auto;background:var(--gold);color:#241a04;border:none;border-radius:999px;
+            padding:14px 26px;font-size:14.5px;font-weight:600;cursor:pointer;}
+  #enterARBtn,#enterDesktopBtn{background:transparent;color:var(--gold);border:1.5px solid var(--gold);}
+  #enterBtn:active,#enterARBtn:active,#enterDesktopBtn:active{transform:scale(0.97);}
+  #note{font-size:12.5px;color:#7f8ba0;max-width:300px;}
+</style>
+</head>
+<body>
+<div id="hud">
+  <div id="score">飾った数 <b id="scoreVal">0</b> / <span id="totalVal">24</span></div>
+</div>
+<div id="intro">
+  <h1>🎄 ツリー・デコレーター</h1>
+  <p>手元の飾りをつかんで、大きなクリスマスツリーに投げて飾ろう。</p>
+  <div id="btnRow">
+    <button id="enterBtn">Meta Questで始める(VR)</button>
+    <button id="enterARBtn">ARで始める(スマホ/Quest)</button>
+    <button id="enterDesktopBtn">ブラウザで始める</button>
+  </div>
+  <p id="note">VR: コントローラーのトリガーでつかむ&投げる。<br>AR: 現実空間に重ねてツリーを表示、指先/コントローラーで操作。<br>ブラウザ: 飾りをドラッグして、離した瞬間の動きで投げる。</p>
+</div>
+
+<script type="importmap">
+{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js" } }
+</script>
+<script type="module">
+import * as THREE from "three";
+
+const ORNAMENT_COUNT = 24;
+const TREE = { baseX: 0, baseY: 0, baseZ: -8, height: 13, baseRadius: 4.5 };
+const ORN_RADIUS = 0.11;
+let score = 0;
+document.getElementById('totalVal').textContent = ORNAMENT_COUNT;
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x0a0e1a);
+scene.fog = new THREE.Fog(0x0a0e1a, 8, 26);
+
+const camera = new THREE.PerspectiveCamera(60, innerWidth/innerHeight, 0.05, 100);
+camera.position.set(0, 1.6, 4);
+camera.lookAt(0, TREE.height*0.42, TREE.baseZ);
+
+const renderer = new THREE.WebGLRenderer({ antialias:true, alpha:true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(innerWidth, innerHeight);
+renderer.xr.enabled = true;
+document.body.appendChild(renderer.domElement);
+
+scene.add(new THREE.HemisphereLight(0x3a4a66, 0x11150c, 0.9));
+const key = new THREE.DirectionalLight(0xfff2d0, 0.9);
+key.position.set(3, 6, 2);
+scene.add(key);
+
+// ground
+const ground = new THREE.Mesh(
+  new THREE.CircleGeometry(20, 48),
+  new THREE.MeshStandardMaterial({ color:0x101a14, roughness:1 })
+);
+ground.rotation.x = -Math.PI/2;
+scene.add(ground);
+
+// tree: stacked cones
+const treeGroup = new THREE.Group();
+treeGroup.position.set(TREE.baseX, TREE.baseY, TREE.baseZ);
+scene.add(treeGroup);
+const trunk = new THREE.Mesh(
+  new THREE.CylinderGeometry(0.6, 0.9, 1.4, 14),
+  new THREE.MeshStandardMaterial({ color:0x4a3220, roughness:0.9 })
+);
+trunk.position.y = 0.7;
+treeGroup.add(trunk);
+const layers = 7;
+for (let i=0; i<layers; i++){
+  const t = i/(layers-1);
+  const y = 1.4 + t*(TREE.height-1.4);
+  const r = TREE.baseRadius*(1 - t*0.85);
+  const h = (TREE.height-1.4)/layers*1.6;
+  const cone = new THREE.Mesh(
+    new THREE.ConeGeometry(r, h, 20),
+    new THREE.MeshStandardMaterial({ color:0x1f4d3a, roughness:0.85 })
+  );
+  cone.position.y = y + h*0.3;
+  treeGroup.add(cone);
+}
+const star = new THREE.Mesh(
+  new THREE.OctahedronGeometry(0.28, 0),
+  new THREE.MeshStandardMaterial({ color:0xf4d35e, emissive:0x8a6a10, roughness:0.4 })
+);
+star.position.y = TREE.height + 0.1;
+treeGroup.add(star);
+
+// ornament rack near spawn
+const colors = [0xd94b4b,0x4b8dd9,0xe8b44a,0x8a4bd9,0xd94ba0,0x4bd98d];
+const ornaments = [];
+const rackCols = 6, rackRows = Math.ceil(ORNAMENT_COUNT/rackCols);
+const geo = new THREE.SphereGeometry(ORN_RADIUS, 16, 16);
+for (let i=0; i<ORNAMENT_COUNT; i++){
+  const mat = new THREE.MeshStandardMaterial({ color: colors[i%colors.length], roughness:0.25, metalness:0.4 });
+  const m = new THREE.Mesh(geo, mat);
+  const col = i % rackCols, row = Math.floor(i/rackCols);
+  m.position.set((col-rackCols/2+0.5)*0.28, 0.9 + row*0.28, 1.2 - row*0.15);
+  m.userData = { held:false, stuck:false, velocity:new THREE.Vector3(), history:[] };
+  scene.add(m);
+  ornaments.push(m);
+}
+const table = new THREE.Mesh(
+  new THREE.BoxGeometry(2.2, 0.06, 0.9),
+  new THREE.MeshStandardMaterial({ color:0x2a1c12, roughness:0.9 })
+);
+table.position.set(0, 0.82, 1.0);
+scene.add(table);
+
+// controllers
+function grabNearest(controller){
+  const cp = new THREE.Vector3();
+  controller.getWorldPosition(cp);
+  let best=null, bestD=0.35;
+  for (const o of ornaments){
+    if (o.userData.held || o.userData.stuck) continue;
+    const op = new THREE.Vector3();
+    o.getWorldPosition(op);
+    const d = op.distanceTo(cp);
+    if (d < bestD){ bestD=d; best=o; }
+  }
+  if (best){
+    best.userData.held = true;
+    best.userData.history = [];
+    controller.attach(best);
+  }
+}
+function releaseHeld(controller){
+  for (const o of ornaments){
+    if (o.userData.held && o.parent === controller){
+      scene.attach(o);
+      o.userData.held = false;
+      const h = o.userData.history;
+      let vel = new THREE.Vector3(0, 2.2, -3);
+      if (h.length >= 2){
+        const a = h[h.length-2], b = h[h.length-1];
+        const dt = (b.t - a.t)/1000;
+        if (dt > 0.001) vel = b.p.clone().sub(a.p).divideScalar(dt).multiplyScalar(1.4);
+      }
+      o.userData.velocity.copy(vel);
+    }
+  }
+}
+const controllers = [0,1].map(i=>{
+  const c = renderer.xr.getController(i);
+  c.addEventListener('selectstart', ()=>grabNearest(c));
+  c.addEventListener('selectend', ()=>releaseHeld(c));
+  scene.add(c);
+  const tip = new THREE.Mesh(new THREE.SphereGeometry(0.02,8,8), new THREE.MeshBasicMaterial({color:0xffffff}));
+  c.add(tip);
+  const ray = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.004,0.004,0.6,6),
+    new THREE.MeshBasicMaterial({ color:0xffe9a8, transparent:true, opacity:0.5 })
+  );
+  ray.rotation.x = -Math.PI/2; ray.position.z = -0.3;
+  c.add(ray);
+  return c;
+});
+
+function checkTreeCollision(o){
+  const relY = o.position.y - TREE.baseY;
+  if (relY <= 0 || relY >= TREE.height) return false;
+  const dx = o.position.x - TREE.baseX, dz = o.position.z - TREE.baseZ;
+  let distXZ = Math.sqrt(dx*dx + dz*dz);
+  const treeR = TREE.baseRadius * (1 - relY/TREE.height);
+  if (distXZ < treeR + ORN_RADIUS){
+    if (distXZ < 0.001) distXZ = 0.001;
+    const scale = (treeR + ORN_RADIUS*0.5) / distXZ;
+    o.position.x = TREE.baseX + dx*scale;
+    o.position.z = TREE.baseZ + dz*scale;
+    o.userData.stuck = true;
+    o.userData.velocity.set(0,0,0);
+    score++;
+    document.getElementById('scoreVal').textContent = score;
+    return true;
+  }
+  return false;
+}
+
+// --- desktop (mouse/touch) mode ---
+let desktopMode = false;
+let draggedOrnament = null;
+const raycaster = new THREE.Raycaster();
+const ndc = new THREE.Vector2();
+const baseCamRot = { x: camera.rotation.x, y: camera.rotation.y };
+
+function ndcFromEvent(e){
+  const rect = renderer.domElement.getBoundingClientRect();
+  ndc.x = ((e.clientX - rect.left)/rect.width)*2 - 1;
+  ndc.y = -((e.clientY - rect.top)/rect.height)*2 + 1;
+}
+
+renderer.domElement.addEventListener('pointerdown', (e)=>{
+  if (!desktopMode || draggedOrnament) return;
+  ndcFromEvent(e);
+  raycaster.setFromCamera(ndc, camera);
+  const targets = ornaments.filter(o=>!o.userData.held && !o.userData.stuck);
+  const hits = raycaster.intersectObjects(targets);
+  if (hits.length){
+    draggedOrnament = hits[0].object;
+    draggedOrnament.userData.held = true;
+    draggedOrnament.userData.history = [];
+  }
+});
+renderer.domElement.addEventListener('pointermove', (e)=>{
+  if (!desktopMode) return;
+  if (draggedOrnament){
+    ndcFromEvent(e);
+    raycaster.setFromCamera(ndc, camera);
+    const viewDir = new THREE.Vector3();
+    camera.getWorldDirection(viewDir);
+    const planePoint = camera.position.clone().addScaledVector(viewDir, 2.2);
+    const plane = new THREE.Plane().setFromNormalAndCoplanarPoint(viewDir, planePoint);
+    const hit = new THREE.Vector3();
+    if (raycaster.ray.intersectPlane(plane, hit)){
+      draggedOrnament.position.copy(hit);
+      draggedOrnament.userData.history.push({ p: hit.clone(), t: performance.now() });
+      if (draggedOrnament.userData.history.length > 4) draggedOrnament.userData.history.shift();
+    }
+  } else {
+    const nx = (e.clientX/innerWidth)*2 - 1;
+    const ny = (e.clientY/innerHeight)*2 - 1;
+    camera.rotation.y = baseCamRot.y - nx*0.25;
+    camera.rotation.x = baseCamRot.x - ny*0.15;
+  }
+});
+addEventListener('pointerup', ()=>{
+  if (!draggedOrnament) return;
+  draggedOrnament.userData.held = false;
+  const h = draggedOrnament.userData.history;
+  let vel = new THREE.Vector3(0, 2, -3);
+  if (h.length >= 2){
+    const a = h[h.length-2], b = h[h.length-1];
+    const dt = (b.t - a.t)/1000;
+    if (dt > 0.001) vel = b.p.clone().sub(a.p).divideScalar(dt).multiplyScalar(1.4);
+  }
+  draggedOrnament.userData.velocity.copy(vel);
+  draggedOrnament = null;
+});
+
+document.getElementById('enterDesktopBtn').addEventListener('click', ()=>{
+  desktopMode = true;
+  document.getElementById('intro').style.display = 'none';
+});
+
+const GRAVITY = -9.8;
+const clock = new THREE.Clock();
+function tick(){
+  const dt = Math.min(clock.getDelta(), 0.05);
+  for (const o of ornaments){
+    if (o.userData.held){
+      const p = new THREE.Vector3();
+      o.getWorldPosition(p);
+      o.userData.history.push({ p, t: performance.now() });
+      if (o.userData.history.length > 4) o.userData.history.shift();
+      continue;
+    }
+    if (o.userData.stuck) continue;
+    o.userData.velocity.y += GRAVITY*dt;
+    o.position.addScaledVector(o.userData.velocity, dt);
+    if (checkTreeCollision(o)) continue;
+    if (o.position.y < ORN_RADIUS){
+      o.position.y = ORN_RADIUS;
+      o.userData.velocity.multiplyScalar(0.25);
+      o.userData.velocity.y *= -0.3;
+    }
+  }
+  renderer.render(scene, camera);
+}
+renderer.setAnimationLoop(tick);
+
+addEventListener('resize', ()=>{
+  camera.aspect = innerWidth/innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+
+const sceneBgBackup = scene.background;
+const fogBackup = scene.fog;
+function enterPassthroughVisuals(){
+  scene.background = null;
+  scene.fog = null;
+  ground.visible = false;
+  renderer.setClearAlpha(0);
+}
+function exitPassthroughVisuals(){
+  scene.background = sceneBgBackup;
+  scene.fog = fogBackup;
+  ground.visible = true;
+  renderer.setClearAlpha(1);
+}
+
+document.getElementById('enterBtn').addEventListener('click', async ()=>{
+  if (!navigator.xr){ alert('この端末・ブラウザはWebXRに対応していません。Meta Questのブラウザで開いてください。'); return; }
+  try{
+    const supported = await navigator.xr.isSessionSupported('immersive-vr');
+    if (!supported){ alert('immersive-vrがサポートされていません。'); return; }
+    const session = await navigator.xr.requestSession('immersive-vr', {
+      optionalFeatures: ['local-floor','bounded-floor','dom-overlay'],
+      domOverlay: { root: document.body }
+    });
+    await renderer.xr.setSession(session);
+    document.getElementById('intro').style.display = 'none';
+    session.addEventListener('end', ()=>{ document.getElementById('intro').style.display = 'flex'; });
+  }catch(e){
+    alert('VRセッションを開始できませんでした: ' + e.message);
+  }
+});
+
+document.getElementById('enterARBtn').addEventListener('click', async ()=>{
+  if (!navigator.xr){ alert('この端末・ブラウザはWebXRに対応していません。'); return; }
+  try{
+    const supported = await navigator.xr.isSessionSupported('immersive-ar');
+    if (!supported){ alert('immersive-arがサポートされていません。対応ブラウザ(Android ChromeやMeta Questブラウザ)で開いてください。'); return; }
+    const session = await navigator.xr.requestSession('immersive-ar', {
+      optionalFeatures: ['local-floor','hit-test','dom-overlay'],
+      domOverlay: { root: document.body }
+    });
+    enterPassthroughVisuals();
+    await renderer.xr.setSession(session);
+    document.getElementById('intro').style.display = 'none';
+    session.addEventListener('end', ()=>{
+      exitPassthroughVisuals();
+      document.getElementById('intro').style.display = 'flex';
+    });
+  }catch(e){
+    exitPassthroughVisuals();
+    alert('ARセッションを開始できませんでした: ' + e.message);
+  }
+});
+</script>
+</body>
+</html>
