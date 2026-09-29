@@ -32,6 +32,24 @@
   .swatch:active{transform:scale(0.88);}
   #hint{position:fixed;left:0;right:0;bottom:calc(22px + env(safe-area-inset-bottom,0px));text-align:center;
         font-size:13px;color:#b9c2d0;pointer-events:none;z-index:4;}
+  #placePanel{position:fixed;left:0;right:0;bottom:calc(22px + env(safe-area-inset-bottom,0px));display:none;
+              flex-direction:column;align-items:center;gap:10px;pointer-events:auto;z-index:6;padding:0 24px;}
+  #placePanel p{margin:0;font-size:13px;color:#b9c2d0;}
+  #sizeSlider{width:min(280px,80vw);}
+  #placeConfirmBtn{background:var(--gold);color:#241a04;border:none;border-radius:999px;padding:12px 30px;
+                    font-size:14.5px;font-weight:600;cursor:pointer;}
+  #modeRow{display:flex;gap:10px;justify-content:center;}
+  .modeBtn{pointer-events:auto;background:transparent;border:1.5px solid var(--gold);color:var(--gold);
+           border-radius:999px;padding:9px 18px;font-size:13.5px;cursor:pointer;}
+  .modeBtn.active{background:var(--gold);color:#241a04;}
+  #roundEnd{position:fixed;inset:0;display:none;align-items:center;justify-content:center;z-index:9;
+            background:rgba(6,9,18,0.72);}
+  #roundEnd .box{background:var(--panel);border:1px solid rgba(232,180,74,0.4);border-radius:16px;
+                 padding:26px 32px;text-align:center;}
+  #roundEnd p{margin:0 0 16px;font-size:17px;}
+  #roundEnd b{color:var(--gold);font-size:26px;}
+  #retryBtn{pointer-events:auto;background:var(--gold);color:#241a04;border:none;border-radius:999px;
+            padding:11px 26px;font-size:14.5px;font-weight:600;cursor:pointer;}
 </style>
 </head>
 <body>
@@ -40,15 +58,30 @@
 </div>
 <div id="colorPicker"></div>
 <div id="hint" style="display:none;">画面をタップすると飾りが出現します</div>
+<div id="placePanel">
+  <p>リングの大きさ = ツリーの大きさ。ちょうどいい位置とサイズになったら固定しよう</p>
+  <input type="range" id="sizeSlider" min="0.15" max="1.5" step="0.05" value="0.5">
+  <button id="placeConfirmBtn">ここに固定する</button>
+</div>
+<div id="roundEnd">
+  <div class="box">
+    <p>終了! スコア: <b id="finalScore">0</b></p>
+    <button id="retryBtn">もう一度</button>
+  </div>
+</div>
 <div id="intro">
   <h1>🎄 ツリー・デコレーター</h1>
   <p>画面をタップして飾りを出し、色を選んでツリーに投げよう。</p>
+  <div id="modeRow">
+    <button id="modeDecorateBtn" class="modeBtn active">🎄 デコレーター</button>
+    <button id="modeShootBtn" class="modeBtn">🎯 シューティング</button>
+  </div>
   <div id="btnRow">
     <button id="enterBtn">Meta Questで始める(VR)</button>
     <button id="enterARBtn">ARで始める(スマホ/Quest)</button>
     <button id="enterDesktopBtn">ブラウザで始める</button>
   </div>
-  <p id="note">タップ/トリガーで飾りを出現 → 色を選ぶ → もう一度つかんでドラッグ、離すと投げられます。<br>AR: 床を認識したらタップでツリーを固定してから遊べます。</p>
+  <p id="note">タップ/トリガーで飾りを出現 → 色を選ぶ → もう一度つかんでドラッグ、離すと投げられます。<br>シューティングは60秒で浮かぶ的をいくつ壊せるかを競います。<br>AR: リングの大きさがそのままツリーの大きさになります。スライダーで調整して固定しよう。</p>
 </div>
 
 <script type="importmap">
@@ -163,28 +196,109 @@ function chooseColor(hex){
   pickerDiv.style.display = 'none';
 }
 
+// game mode: decorate the tree, or a 60s target-shooting round
+let selectedMode = 'decorate';
+let gameMode = 'decorate';
+let shootScore = 0;
+let shootTimeLeft = 60;
+let shootActive = false;
+const targets = [];
+const targetGeo = new THREE.IcosahedronGeometry(0.35, 0);
+
+document.getElementById('modeDecorateBtn').addEventListener('click', ()=>{
+  selectedMode = 'decorate';
+  document.getElementById('modeDecorateBtn').classList.add('active');
+  document.getElementById('modeShootBtn').classList.remove('active');
+});
+document.getElementById('modeShootBtn').addEventListener('click', ()=>{
+  selectedMode = 'shoot';
+  document.getElementById('modeShootBtn').classList.add('active');
+  document.getElementById('modeDecorateBtn').classList.remove('active');
+});
+
+function updateHUD(){
+  const el = document.getElementById('score');
+  if (gameMode === 'shoot'){
+    el.innerHTML = 'スコア <b>'+shootScore+'</b>・⏱<b>'+Math.max(0,Math.ceil(shootTimeLeft))+'</b>s';
+  } else {
+    el.innerHTML = '飾った数 <b>'+score+'</b>';
+  }
+}
+
+function clearTargets(){
+  targets.forEach(t=>{ scene.remove(t); t.material.dispose(); });
+  targets.length = 0;
+}
+function spawnTarget(){
+  const mat = new THREE.MeshStandardMaterial({ color:0xffe066, emissive:0x664d00, roughness:0.3, metalness:0.5 });
+  const t = new THREE.Mesh(targetGeo, mat);
+  const baseY = 1.5 + Math.random()*4;
+  t.position.set((Math.random()-0.5)*6, baseY, TREE.baseZ + 2 + Math.random()*6);
+  t.userData = { bobPhase: Math.random()*Math.PI*2, bobSpeed: 1 + Math.random(), baseY };
+  scene.add(t);
+  targets.push(t);
+}
+function endShootRound(){
+  shootActive = false;
+  document.getElementById('finalScore').textContent = shootScore;
+  document.getElementById('roundEnd').style.display = 'flex';
+}
+document.getElementById('retryBtn').addEventListener('click', ()=>{
+  document.getElementById('roundEnd').style.display = 'none';
+  shootScore = 0;
+  shootTimeLeft = 60;
+  shootActive = true;
+  clearTargets();
+  for (let i=0; i<5; i++) spawnTarget();
+  updateHUD();
+});
+
+function startGameMode(hintText){
+  gameMode = selectedMode;
+  score = 0;
+  shootScore = 0;
+  shootTimeLeft = 60;
+  shootActive = (gameMode === 'shoot');
+  clearTargets();
+  if (gameMode === 'shoot'){ for (let i=0; i<5; i++) spawnTarget(); }
+  updateHUD();
+  const hint = document.getElementById('hint');
+  hint.textContent = hintText;
+  hint.style.display = 'block';
+}
+
 // AR surface placement
 let xrMode = null; // 'vr' | 'ar' | null
 let treePlaced = true;
+let treeScale = 1;
+let previewScale = 0.5;
 let hitTestSource = null;
 let hitTestSourceRequested = false;
 let hitTestAvailable = false;
 const reticle = new THREE.Mesh(
-  new THREE.RingGeometry(0.15, 0.2, 32).rotateX(-Math.PI/2),
+  new THREE.RingGeometry(0.9, 1, 48).rotateX(-Math.PI/2),
   new THREE.MeshBasicMaterial({ color:0xe8b44a, transparent:true, opacity:0.85, side:THREE.DoubleSide })
 );
 reticle.visible = false;
 scene.add(reticle);
 
-function placeTreeAt(pos){
-  treeGroup.position.copy(pos);
+const sizeSlider = document.getElementById('sizeSlider');
+previewScale = parseFloat(sizeSlider.value);
+sizeSlider.addEventListener('input', ()=>{ previewScale = parseFloat(sizeSlider.value); });
+
+document.getElementById('placeConfirmBtn').addEventListener('click', ()=>{
+  if (xrMode !== 'ar' || treePlaced || !reticle.visible) return;
+  treeGroup.position.copy(reticle.position);
+  treeGroup.scale.setScalar(previewScale);
+  treeScale = previewScale;
   treeGroup.visible = true;
   treePlaced = true;
   reticle.visible = false;
+  document.getElementById('placePanel').style.display = 'none';
   const hint = document.getElementById('hint');
-  hint.textContent = 'トリガーで飾りが出現します';
+  hint.textContent = gameMode === 'shoot' ? 'トリガー/タップで飾りを出して的を狙おう' : 'トリガー/タップで飾りが出現します';
   hint.style.display = 'block';
-}
+});
 
 function releaseHeld(controller){
   for (const o of ornaments){
@@ -204,16 +318,7 @@ function releaseHeld(controller){
   }
 }
 function onSelectStart(c){
-  if (xrMode === 'ar' && !treePlaced){
-    if (reticle.visible){ placeTreeAt(reticle.position); return; }
-    if (!hitTestAvailable){
-      const forward = new THREE.Vector3();
-      camera.getWorldDirection(forward);
-      forward.y = 0; forward.normalize();
-      placeTreeAt(camera.position.clone().addScaledVector(forward, 3).setY(0));
-    }
-    return;
-  }
+  if (xrMode === 'ar' && !treePlaced) return; // placement is confirmed via the panel button, not a tap
   if (awaitingColor) return;
   if (!activeOrnament){ spawnOrnament(); return; }
   if (!activeOrnament.userData.held){
@@ -240,20 +345,20 @@ const controllers = [0,1].map(i=>{
 });
 
 function checkTreeCollision(o){
-  const relY = o.position.y - TREE.baseY;
-  if (relY <= 0 || relY >= TREE.height) return false;
-  const dx = o.position.x - TREE.baseX, dz = o.position.z - TREE.baseZ;
+  const relY = o.position.y - treeGroup.position.y;
+  const h = TREE.height * treeScale;
+  if (relY <= 0 || relY >= h) return false;
+  const dx = o.position.x - treeGroup.position.x, dz = o.position.z - treeGroup.position.z;
   let distXZ = Math.sqrt(dx*dx + dz*dz);
-  const treeR = TREE.baseRadius * (1 - relY/TREE.height);
+  const treeR = TREE.baseRadius * treeScale * (1 - relY/h);
   if (distXZ < treeR + ORN_RADIUS){
     if (distXZ < 0.001) distXZ = 0.001;
     const scale = (treeR + ORN_RADIUS*0.5) / distXZ;
-    o.position.x = TREE.baseX + dx*scale;
-    o.position.z = TREE.baseZ + dz*scale;
+    o.position.x = treeGroup.position.x + dx*scale;
+    o.position.z = treeGroup.position.z + dz*scale;
     o.userData.stuck = true;
     o.userData.velocity.set(0,0,0);
-    score++;
-    document.getElementById('scoreVal').textContent = score;
+    if (gameMode === 'decorate'){ score++; updateHUD(); }
     return true;
   }
   return false;
@@ -322,7 +427,7 @@ addEventListener('pointerup', ()=>{
 document.getElementById('enterDesktopBtn').addEventListener('click', ()=>{
   desktopMode = true;
   document.getElementById('intro').style.display = 'none';
-  document.getElementById('hint').style.display = 'block';
+  startGameMode(selectedMode === 'shoot' ? '画面をタップして飾りを出し的を狙おう' : '画面をタップすると飾りが出現します');
 });
 
 const GRAVITY = -9.8;
@@ -330,7 +435,7 @@ const clock = new THREE.Clock();
 function tick(time, frame){
   const dt = Math.min(clock.getDelta(), 0.05);
 
-  if (xrMode === 'ar' && frame){
+  if (xrMode === 'ar' && frame && !treePlaced){
     const session = renderer.xr.getSession();
     if (!hitTestSourceRequested){
       hitTestSourceRequested = true;
@@ -341,17 +446,36 @@ function tick(time, frame){
         }).catch(()=>{ hitTestAvailable = false; });
       }).catch(()=>{ hitTestAvailable = false; });
     }
-    if (hitTestSource && !treePlaced){
+    let foundPose = false;
+    if (hitTestSource){
       const refSpace = renderer.xr.getReferenceSpace();
       const results = frame.getHitTestResults(hitTestSource);
       if (results.length){
         const pose = results[0].getPose(refSpace);
-        reticle.visible = true;
         reticle.position.set(pose.transform.position.x, pose.transform.position.y, pose.transform.position.z);
-      } else {
-        reticle.visible = false;
+        foundPose = true;
       }
     }
+    if (!foundPose){
+      const forward = new THREE.Vector3();
+      camera.getWorldDirection(forward);
+      forward.y = 0; forward.normalize();
+      reticle.position.copy(camera.position).addScaledVector(forward, 3);
+      reticle.position.y = 0;
+    }
+    reticle.visible = true;
+    reticle.scale.setScalar(TREE.baseRadius * previewScale);
+  }
+
+  if (gameMode === 'shoot' && shootActive){
+    shootTimeLeft -= dt;
+    for (const t of targets){
+      t.userData.bobPhase += dt*t.userData.bobSpeed;
+      t.position.y = t.userData.baseY + Math.sin(t.userData.bobPhase)*0.4;
+      t.rotation.y += dt*0.8;
+    }
+    updateHUD();
+    if (shootTimeLeft <= 0){ shootTimeLeft = 0; endShootRound(); }
   }
 
   const anchor = computeHandAnchor();
@@ -371,6 +495,22 @@ function tick(time, frame){
     }
     o.userData.velocity.y += GRAVITY*dt;
     o.position.addScaledVector(o.userData.velocity, dt);
+    if (gameMode === 'shoot'){
+      let hitTarget = null;
+      for (const t of targets){
+        if (o.position.distanceTo(t.position) < ORN_RADIUS + 0.35){ hitTarget = t; break; }
+      }
+      if (hitTarget){
+        scene.remove(hitTarget);
+        hitTarget.material.dispose();
+        targets.splice(targets.indexOf(hitTarget), 1);
+        if (shootActive){ shootScore++; spawnTarget(); updateHUD(); }
+        scene.remove(o);
+        o.material.dispose();
+        ornaments.splice(idx, 1);
+        continue;
+      }
+    }
     if (checkTreeCollision(o)) continue;
     if (o.position.y < ORN_RADIUS){
       o.position.y = ORN_RADIUS;
@@ -427,9 +567,7 @@ document.getElementById('enterBtn').addEventListener('click', async ()=>{
     treeGroup.visible = true;
     await renderer.xr.setSession(session);
     document.getElementById('intro').style.display = 'none';
-    const hint = document.getElementById('hint');
-    hint.textContent = 'トリガーで飾りが出現します';
-    hint.style.display = 'block';
+    startGameMode(selectedMode === 'shoot' ? 'トリガーで飾りを出して的を狙おう' : 'トリガーで飾りが出現します');
     session.addEventListener('end', ()=>{ xrMode = null; document.getElementById('intro').style.display = 'flex'; });
   }catch(e){
     alert('VRセッションを開始できませんでした: ' + e.message);
@@ -452,14 +590,18 @@ document.getElementById('enterARBtn').addEventListener('click', async ()=>{
     hitTestSource = null;
     hitTestSourceRequested = false;
     hitTestAvailable = false;
+    previewScale = parseFloat(sizeSlider.value);
     await renderer.xr.setSession(session);
     document.getElementById('intro').style.display = 'none';
-    const hint = document.getElementById('hint');
-    hint.textContent = '床にリングが出たらタップ/トリガーでツリーを固定';
-    hint.style.display = 'block';
+    document.getElementById('placePanel').style.display = 'flex';
+    startGameMode('');
+    document.getElementById('hint').style.display = 'none';
     session.addEventListener('end', ()=>{
       xrMode = null;
       treeGroup.position.set(TREE.baseX, TREE.baseY, TREE.baseZ);
+      treeGroup.scale.setScalar(1);
+      treeScale = 1;
+      document.getElementById('placePanel').style.display = 'none';
       exitPassthroughVisuals();
       document.getElementById('intro').style.display = 'flex';
     });
