@@ -26,10 +26,11 @@
   #enterARBtn,#enterDesktopBtn{background:transparent;color:var(--gold);border:1.5px solid var(--gold);}
   #enterBtn:active,#enterARBtn:active,#enterDesktopBtn:active{transform:scale(0.97);}
   #note{font-size:12.5px;color:#7f8ba0;max-width:300px;}
-  #colorPicker{position:fixed;left:0;right:0;bottom:calc(22px + env(safe-area-inset-bottom,0px));display:none;
+  #shapePicker,#colorPicker{position:fixed;left:0;right:0;bottom:calc(22px + env(safe-area-inset-bottom,0px));display:none;
                gap:12px;justify-content:center;pointer-events:auto;z-index:6;flex-wrap:wrap;padding:0 16px;}
   .swatch{width:44px;height:44px;border-radius:50%;border:3px solid rgba(255,255,255,0.75);cursor:pointer;}
   .swatch:active{transform:scale(0.88);}
+  .shapeSwatch{background:#fff;color:#2a1c40;font-size:20px;display:flex;align-items:center;justify-content:center;}
   #hint{position:fixed;left:0;right:0;bottom:calc(22px + env(safe-area-inset-bottom,0px));text-align:center;
         font-size:13px;color:#b9c2d0;pointer-events:none;z-index:4;}
   #placePanel{position:fixed;left:0;right:0;bottom:calc(22px + env(safe-area-inset-bottom,0px));display:none;
@@ -38,50 +39,29 @@
   #sizeSlider{width:min(280px,80vw);}
   #placeConfirmBtn{background:var(--gold);color:#241a04;border:none;border-radius:999px;padding:12px 30px;
                     font-size:14.5px;font-weight:600;cursor:pointer;}
-  #modeRow{display:flex;gap:10px;justify-content:center;}
-  .modeBtn{pointer-events:auto;background:transparent;border:1.5px solid var(--gold);color:var(--gold);
-           border-radius:999px;padding:9px 18px;font-size:13.5px;cursor:pointer;}
-  .modeBtn.active{background:var(--gold);color:#241a04;}
-  #roundEnd{position:fixed;inset:0;display:none;align-items:center;justify-content:center;z-index:9;
-            background:rgba(6,9,18,0.72);}
-  #roundEnd .box{background:var(--panel);border:1px solid rgba(232,180,74,0.4);border-radius:16px;
-                 padding:26px 32px;text-align:center;}
-  #roundEnd p{margin:0 0 16px;font-size:17px;}
-  #roundEnd b{color:var(--gold);font-size:26px;}
-  #retryBtn{pointer-events:auto;background:var(--gold);color:#241a04;border:none;border-radius:999px;
-            padding:11px 26px;font-size:14.5px;font-weight:600;cursor:pointer;}
 </style>
 </head>
 <body>
 <div id="hud">
   <div id="score">飾った数 <b id="scoreVal">0</b></div>
 </div>
+<div id="shapePicker"></div>
 <div id="colorPicker"></div>
 <div id="hint" style="display:none;">画面をタップすると飾りが出現します</div>
 <div id="placePanel">
-  <p>リングの大きさ = ツリーの大きさ。ちょうどいい位置とサイズになったら固定しよう</p>
+  <p>リングの大きさ = ツリーの大きさ(飾りもそれに合わせて大きさが変わります)</p>
   <input type="range" id="sizeSlider" min="0.15" max="1.5" step="0.05" value="0.5">
   <button id="placeConfirmBtn">ここに固定する</button>
 </div>
-<div id="roundEnd">
-  <div class="box">
-    <p>終了! スコア: <b id="finalScore">0</b></p>
-    <button id="retryBtn">もう一度</button>
-  </div>
-</div>
 <div id="intro">
   <h1>🎄 ツリー・デコレーター</h1>
-  <p>画面をタップして飾りを出し、色を選んでツリーに投げよう。</p>
-  <div id="modeRow">
-    <button id="modeDecorateBtn" class="modeBtn active">🎄 デコレーター</button>
-    <button id="modeShootBtn" class="modeBtn">🎯 シューティング</button>
-  </div>
+  <p>画面をタップして飾りを出し、形と色を選んでツリーに投げよう。</p>
   <div id="btnRow">
     <button id="enterBtn">Meta Questで始める(VR)</button>
     <button id="enterARBtn">ARで始める(スマホ/Quest)</button>
     <button id="enterDesktopBtn">ブラウザで始める</button>
   </div>
-  <p id="note">タップ/トリガーで飾りを出現 → 色を選ぶ → もう一度つかんでドラッグ、離すと投げられます。<br>シューティングは60秒で浮かぶ的をいくつ壊せるかを競います。<br>AR: リングの大きさがそのままツリーの大きさになります。スライダーで調整して固定しよう。</p>
+  <p id="note">タップ/トリガーで飾りを出現 → 形を選ぶ → 色を選ぶ → もう一度つかんでドラッグ、離すと投げられます。<br>AR: リングの大きさがそのままツリーの大きさに(飾りの大きさも連動)。スライダーで調整して固定しよう。</p>
 </div>
 
 <script type="importmap">
@@ -91,7 +71,7 @@
 import * as THREE from "three";
 
 const TREE = { baseX: 0, baseY: 0, baseZ: -8, height: 13, baseRadius: 4.5 };
-const ORN_RADIUS = 0.14;
+const BASE_ORN_RADIUS = 0.14; // ornament size at treeScale = 1
 let score = 0;
 
 const scene = new THREE.Scene();
@@ -151,13 +131,32 @@ const star = new THREE.Mesh(
 star.position.y = TREE.height + 0.1;
 treeGroup.add(star);
 
-// ornaments are spawned on demand, one at a time
+function updateHUD(){
+  document.getElementById('scoreVal').textContent = score;
+}
+
+// ornaments are spawned on demand, one at a time: pick a shape, then a color
 const colors = [0xd94b4b,0x4b8dd9,0xe8b44a,0x8a4bd9,0xd94ba0,0x4bd98d];
+function ornRadius(){ return BASE_ORN_RADIUS * treeScale; }
+const shapes = {
+  ball: { icon:'●', build:(r)=> new THREE.SphereGeometry(r, 16, 16) },
+  cube: { icon:'■', build:(r)=> new THREE.BoxGeometry(r*1.6, r*1.6, r*1.6) },
+  gem:  { icon:'◆', build:(r)=> new THREE.OctahedronGeometry(r*1.35, 0) },
+  bell: { icon:'▲', build:(r)=> new THREE.ConeGeometry(r*1.2, r*2.2, 14) }
+};
 const ornaments = [];
-const geo = new THREE.SphereGeometry(ORN_RADIUS, 16, 16);
 let activeOrnament = null;
+let awaitingShape = false;
 let awaitingColor = false;
 
+const shapePickerDiv = document.getElementById('shapePicker');
+Object.keys(shapes).forEach(key=>{
+  const b = document.createElement('button');
+  b.className = 'swatch shapeSwatch';
+  b.textContent = shapes[key].icon;
+  b.addEventListener('click', ()=>chooseShape(key));
+  shapePickerDiv.appendChild(b);
+});
 const pickerDiv = document.getElementById('colorPicker');
 colors.forEach(c=>{
   const b = document.createElement('button');
@@ -166,6 +165,21 @@ colors.forEach(c=>{
   b.addEventListener('click', ()=>chooseColor(c));
   pickerDiv.appendChild(b);
 });
+function chooseShape(key){
+  if (!activeOrnament) return;
+  activeOrnament.geometry.dispose();
+  activeOrnament.geometry = shapes[key].build(activeOrnament.userData.radius);
+  awaitingShape = false;
+  awaitingColor = true;
+  shapePickerDiv.style.display = 'none';
+  pickerDiv.style.display = 'flex';
+}
+function chooseColor(hex){
+  if (!activeOrnament) return;
+  activeOrnament.material.color.setHex(hex);
+  awaitingColor = false;
+  pickerDiv.style.display = 'none';
+}
 
 function computeHandAnchor(){
   const forward = new THREE.Vector3();
@@ -177,94 +191,17 @@ function computeHandAnchor(){
 
 function spawnOrnament(){
   if (activeOrnament) return;
-  const mat = new THREE.MeshStandardMaterial({ color:0xffffff, roughness:0.25, metalness:0.4 });
-  const m = new THREE.Mesh(geo, mat);
+  const r = ornRadius();
+  const mat = new THREE.MeshStandardMaterial({ color:0xdddddd, roughness:0.25, metalness:0.4 });
+  const m = new THREE.Mesh(shapes.ball.build(r), mat);
   m.position.copy(computeHandAnchor());
-  m.userData = { held:false, stuck:false, floating:true, velocity:new THREE.Vector3(), history:[], settleTimer:0 };
+  m.userData = { held:false, stuck:false, floating:true, velocity:new THREE.Vector3(), history:[], settleTimer:0, radius:r };
   scene.add(m);
   ornaments.push(m);
   activeOrnament = m;
-  awaitingColor = true;
-  pickerDiv.style.display = 'flex';
+  awaitingShape = true;
+  shapePickerDiv.style.display = 'flex';
   document.getElementById('hint').style.display = 'none';
-}
-
-function chooseColor(hex){
-  if (!activeOrnament) return;
-  activeOrnament.material.color.setHex(hex);
-  awaitingColor = false;
-  pickerDiv.style.display = 'none';
-}
-
-// game mode: decorate the tree, or a 60s target-shooting round
-let selectedMode = 'decorate';
-let gameMode = 'decorate';
-let shootScore = 0;
-let shootTimeLeft = 60;
-let shootActive = false;
-const targets = [];
-const targetGeo = new THREE.IcosahedronGeometry(0.35, 0);
-
-document.getElementById('modeDecorateBtn').addEventListener('click', ()=>{
-  selectedMode = 'decorate';
-  document.getElementById('modeDecorateBtn').classList.add('active');
-  document.getElementById('modeShootBtn').classList.remove('active');
-});
-document.getElementById('modeShootBtn').addEventListener('click', ()=>{
-  selectedMode = 'shoot';
-  document.getElementById('modeShootBtn').classList.add('active');
-  document.getElementById('modeDecorateBtn').classList.remove('active');
-});
-
-function updateHUD(){
-  const el = document.getElementById('score');
-  if (gameMode === 'shoot'){
-    el.innerHTML = 'スコア <b>'+shootScore+'</b>・⏱<b>'+Math.max(0,Math.ceil(shootTimeLeft))+'</b>s';
-  } else {
-    el.innerHTML = '飾った数 <b>'+score+'</b>';
-  }
-}
-
-function clearTargets(){
-  targets.forEach(t=>{ scene.remove(t); t.material.dispose(); });
-  targets.length = 0;
-}
-function spawnTarget(){
-  const mat = new THREE.MeshStandardMaterial({ color:0xffe066, emissive:0x664d00, roughness:0.3, metalness:0.5 });
-  const t = new THREE.Mesh(targetGeo, mat);
-  const baseY = 1.5 + Math.random()*4;
-  t.position.set((Math.random()-0.5)*6, baseY, TREE.baseZ + 2 + Math.random()*6);
-  t.userData = { bobPhase: Math.random()*Math.PI*2, bobSpeed: 1 + Math.random(), baseY };
-  scene.add(t);
-  targets.push(t);
-}
-function endShootRound(){
-  shootActive = false;
-  document.getElementById('finalScore').textContent = shootScore;
-  document.getElementById('roundEnd').style.display = 'flex';
-}
-document.getElementById('retryBtn').addEventListener('click', ()=>{
-  document.getElementById('roundEnd').style.display = 'none';
-  shootScore = 0;
-  shootTimeLeft = 60;
-  shootActive = true;
-  clearTargets();
-  for (let i=0; i<5; i++) spawnTarget();
-  updateHUD();
-});
-
-function startGameMode(hintText){
-  gameMode = selectedMode;
-  score = 0;
-  shootScore = 0;
-  shootTimeLeft = 60;
-  shootActive = (gameMode === 'shoot');
-  clearTargets();
-  if (gameMode === 'shoot'){ for (let i=0; i<5; i++) spawnTarget(); }
-  updateHUD();
-  const hint = document.getElementById('hint');
-  hint.textContent = hintText;
-  hint.style.display = 'block';
 }
 
 // AR surface placement
@@ -296,7 +233,7 @@ document.getElementById('placeConfirmBtn').addEventListener('click', ()=>{
   reticle.visible = false;
   document.getElementById('placePanel').style.display = 'none';
   const hint = document.getElementById('hint');
-  hint.textContent = gameMode === 'shoot' ? 'トリガー/タップで飾りを出して的を狙おう' : 'トリガー/タップで飾りが出現します';
+  hint.textContent = 'トリガー/タップで飾りが出現します';
   hint.style.display = 'block';
 });
 
@@ -306,11 +243,11 @@ function releaseHeld(controller){
       scene.attach(o);
       o.userData.held = false;
       const h = o.userData.history;
-      let vel = new THREE.Vector3(0, 2.2, -3);
+      let vel = camera.getWorldDirection(new THREE.Vector3()).multiplyScalar(3).add(new THREE.Vector3(0,1.6,0));
       if (h.length >= 2){
-        const a = h[h.length-2], b = h[h.length-1];
+        const a = h[0], b = h[h.length-1];
         const dt = (b.t - a.t)/1000;
-        if (dt > 0.001) vel = b.p.clone().sub(a.p).divideScalar(dt).multiplyScalar(1.4);
+        if (dt > 0.03) vel = b.p.clone().sub(a.p).divideScalar(dt).multiplyScalar(1.3);
       }
       o.userData.velocity.copy(vel);
       if (o === activeOrnament) activeOrnament = null;
@@ -319,7 +256,7 @@ function releaseHeld(controller){
 }
 function onSelectStart(c){
   if (xrMode === 'ar' && !treePlaced) return; // placement is confirmed via the panel button, not a tap
-  if (awaitingColor) return;
+  if (awaitingShape || awaitingColor) return;
   if (!activeOrnament){ spawnOrnament(); return; }
   if (!activeOrnament.userData.held){
     activeOrnament.userData.held = true;
@@ -344,26 +281,6 @@ const controllers = [0,1].map(i=>{
   return c;
 });
 
-function checkTreeCollision(o){
-  const relY = o.position.y - treeGroup.position.y;
-  const h = TREE.height * treeScale;
-  if (relY <= 0 || relY >= h) return false;
-  const dx = o.position.x - treeGroup.position.x, dz = o.position.z - treeGroup.position.z;
-  let distXZ = Math.sqrt(dx*dx + dz*dz);
-  const treeR = TREE.baseRadius * treeScale * (1 - relY/h);
-  if (distXZ < treeR + ORN_RADIUS){
-    if (distXZ < 0.001) distXZ = 0.001;
-    const scale = (treeR + ORN_RADIUS*0.5) / distXZ;
-    o.position.x = treeGroup.position.x + dx*scale;
-    o.position.z = treeGroup.position.z + dz*scale;
-    o.userData.stuck = true;
-    o.userData.velocity.set(0,0,0);
-    if (gameMode === 'decorate'){ score++; updateHUD(); }
-    return true;
-  }
-  return false;
-}
-
 // --- desktop (mouse/touch) mode ---
 let desktopMode = false;
 let draggedOrnament = null;
@@ -378,13 +295,13 @@ function ndcFromEvent(e){
 }
 
 renderer.domElement.addEventListener('pointerdown', (e)=>{
-  if (!desktopMode || draggedOrnament || awaitingColor) return;
+  if (!desktopMode || draggedOrnament || awaitingShape || awaitingColor) return;
   if (!activeOrnament){ spawnOrnament(); return; }
   if (!activeOrnament.userData.held){
     draggedOrnament = activeOrnament;
     draggedOrnament.userData.held = true;
     draggedOrnament.userData.floating = false;
-    draggedOrnament.userData.history = [];
+    draggedOrnament.userData.grabAnchor = draggedOrnament.position.clone();
   }
 });
 renderer.domElement.addEventListener('pointermove', (e)=>{
@@ -397,11 +314,7 @@ renderer.domElement.addEventListener('pointermove', (e)=>{
     const planePoint = camera.position.clone().addScaledVector(viewDir, 2.2);
     const plane = new THREE.Plane().setFromNormalAndCoplanarPoint(viewDir, planePoint);
     const hit = new THREE.Vector3();
-    if (raycaster.ray.intersectPlane(plane, hit)){
-      draggedOrnament.position.copy(hit);
-      draggedOrnament.userData.history.push({ p: hit.clone(), t: performance.now() });
-      if (draggedOrnament.userData.history.length > 4) draggedOrnament.userData.history.shift();
-    }
+    if (raycaster.ray.intersectPlane(plane, hit)) draggedOrnament.position.copy(hit);
   } else {
     const nx = (e.clientX/innerWidth)*2 - 1;
     const ny = (e.clientY/innerHeight)*2 - 1;
@@ -412,13 +325,11 @@ renderer.domElement.addEventListener('pointermove', (e)=>{
 addEventListener('pointerup', ()=>{
   if (!draggedOrnament) return;
   draggedOrnament.userData.held = false;
-  const h = draggedOrnament.userData.history;
-  let vel = new THREE.Vector3(0, 2, -3);
-  if (h.length >= 2){
-    const a = h[h.length-2], b = h[h.length-1];
-    const dt = (b.t - a.t)/1000;
-    if (dt > 0.001) vel = b.p.clone().sub(a.p).divideScalar(dt).multiplyScalar(1.4);
-  }
+  const forward = new THREE.Vector3();
+  camera.getWorldDirection(forward);
+  const pull = draggedOrnament.userData.grabAnchor.clone().sub(draggedOrnament.position);
+  pull.clampLength(0, 1.6);
+  const vel = forward.multiplyScalar(6.5).add(pull.multiplyScalar(3.5));
   draggedOrnament.userData.velocity.copy(vel);
   if (draggedOrnament === activeOrnament) activeOrnament = null;
   draggedOrnament = null;
@@ -427,8 +338,29 @@ addEventListener('pointerup', ()=>{
 document.getElementById('enterDesktopBtn').addEventListener('click', ()=>{
   desktopMode = true;
   document.getElementById('intro').style.display = 'none';
-  startGameMode(selectedMode === 'shoot' ? '画面をタップして飾りを出し的を狙おう' : '画面をタップすると飾りが出現します');
+  document.getElementById('hint').textContent = '画面をタップすると飾りが出現します';
+  document.getElementById('hint').style.display = 'block';
 });
+
+function checkTreeCollision(o){
+  const relY = o.position.y - treeGroup.position.y;
+  const h = TREE.height * treeScale;
+  if (relY <= 0 || relY >= h) return false;
+  const dx = o.position.x - treeGroup.position.x, dz = o.position.z - treeGroup.position.z;
+  let distXZ = Math.sqrt(dx*dx + dz*dz);
+  const treeR = TREE.baseRadius * treeScale * (1 - relY/h);
+  if (distXZ < treeR + o.userData.radius){
+    if (distXZ < 0.001) distXZ = 0.001;
+    const scale = (treeR + o.userData.radius*0.5) / distXZ;
+    o.position.x = treeGroup.position.x + dx*scale;
+    o.position.z = treeGroup.position.z + dz*scale;
+    o.userData.stuck = true;
+    o.userData.velocity.set(0,0,0);
+    score++; updateHUD();
+    return true;
+  }
+  return false;
+}
 
 const GRAVITY = -9.8;
 const clock = new THREE.Clock();
@@ -467,17 +399,6 @@ function tick(time, frame){
     reticle.scale.setScalar(TREE.baseRadius * previewScale);
   }
 
-  if (gameMode === 'shoot' && shootActive){
-    shootTimeLeft -= dt;
-    for (const t of targets){
-      t.userData.bobPhase += dt*t.userData.bobSpeed;
-      t.position.y = t.userData.baseY + Math.sin(t.userData.bobPhase)*0.4;
-      t.rotation.y += dt*0.8;
-    }
-    updateHUD();
-    if (shootTimeLeft <= 0){ shootTimeLeft = 0; endShootRound(); }
-  }
-
   const anchor = computeHandAnchor();
   for (let idx = ornaments.length - 1; idx >= 0; idx--){
     const o = ornaments[idx];
@@ -485,7 +406,7 @@ function tick(time, frame){
       const p = new THREE.Vector3();
       o.getWorldPosition(p);
       o.userData.history.push({ p, t: performance.now() });
-      if (o.userData.history.length > 4) o.userData.history.shift();
+      if (o.userData.history.length > 10) o.userData.history.shift();
       continue;
     }
     if (o.userData.stuck) continue;
@@ -495,25 +416,9 @@ function tick(time, frame){
     }
     o.userData.velocity.y += GRAVITY*dt;
     o.position.addScaledVector(o.userData.velocity, dt);
-    if (gameMode === 'shoot'){
-      let hitTarget = null;
-      for (const t of targets){
-        if (o.position.distanceTo(t.position) < ORN_RADIUS + 0.35){ hitTarget = t; break; }
-      }
-      if (hitTarget){
-        scene.remove(hitTarget);
-        hitTarget.material.dispose();
-        targets.splice(targets.indexOf(hitTarget), 1);
-        if (shootActive){ shootScore++; spawnTarget(); updateHUD(); }
-        scene.remove(o);
-        o.material.dispose();
-        ornaments.splice(idx, 1);
-        continue;
-      }
-    }
     if (checkTreeCollision(o)) continue;
-    if (o.position.y < ORN_RADIUS){
-      o.position.y = ORN_RADIUS;
+    if (o.position.y < o.userData.radius){
+      o.position.y = o.userData.radius;
       o.userData.velocity.multiplyScalar(0.25);
       o.userData.velocity.y *= -0.3;
       if (o.userData.velocity.length() < 0.15){
@@ -521,6 +426,7 @@ function tick(time, frame){
         if (o.userData.settleTimer > 0.6){
           scene.remove(o);
           o.material.dispose();
+          o.geometry.dispose();
           ornaments.splice(idx, 1);
         }
       } else {
@@ -559,15 +465,19 @@ document.getElementById('enterBtn').addEventListener('click', async ()=>{
     const supported = await navigator.xr.isSessionSupported('immersive-vr');
     if (!supported){ alert('immersive-vrがサポートされていません。'); return; }
     const session = await navigator.xr.requestSession('immersive-vr', {
-      optionalFeatures: ['local-floor','bounded-floor','dom-overlay'],
+      optionalFeatures: ['local-floor','bounded-floor','dom-overlay','hand-tracking'],
       domOverlay: { root: document.body }
     });
     xrMode = 'vr';
     treePlaced = true;
+    treeScale = 1;
+    treeGroup.scale.setScalar(1);
     treeGroup.visible = true;
     await renderer.xr.setSession(session);
     document.getElementById('intro').style.display = 'none';
-    startGameMode(selectedMode === 'shoot' ? 'トリガーで飾りを出して的を狙おう' : 'トリガーで飾りが出現します');
+    const hint = document.getElementById('hint');
+    hint.textContent = 'トリガーで飾りが出現します';
+    hint.style.display = 'block';
     session.addEventListener('end', ()=>{ xrMode = null; document.getElementById('intro').style.display = 'flex'; });
   }catch(e){
     alert('VRセッションを開始できませんでした: ' + e.message);
@@ -580,7 +490,7 @@ document.getElementById('enterARBtn').addEventListener('click', async ()=>{
     const supported = await navigator.xr.isSessionSupported('immersive-ar');
     if (!supported){ alert('immersive-arがサポートされていません。対応ブラウザ(Android ChromeやMeta Questブラウザ)で開いてください。'); return; }
     const session = await navigator.xr.requestSession('immersive-ar', {
-      optionalFeatures: ['local-floor','hit-test','dom-overlay'],
+      optionalFeatures: ['local-floor','hit-test','dom-overlay','hand-tracking'],
       domOverlay: { root: document.body }
     });
     enterPassthroughVisuals();
@@ -594,8 +504,6 @@ document.getElementById('enterARBtn').addEventListener('click', async ()=>{
     await renderer.xr.setSession(session);
     document.getElementById('intro').style.display = 'none';
     document.getElementById('placePanel').style.display = 'flex';
-    startGameMode('');
-    document.getElementById('hint').style.display = 'none';
     session.addEventListener('end', ()=>{
       xrMode = null;
       treeGroup.position.set(TREE.baseX, TREE.baseY, TREE.baseZ);
