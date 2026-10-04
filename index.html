@@ -3,42 +3,68 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600&family=Noto+Serif+JP:wght@500;700&display=swap">
 <title>ツリー・デコレーター</title>
 <style>
   :root{
-    --bg:#0a0e1a; --panel:rgba(10,14,26,0.82); --gold:#e8b44a; --snow:#eef2f7; --pine:#1f4d3a;
+    --bg:#0d1812; --panel:linear-gradient(160deg, rgba(28,45,34,0.82), rgba(13,24,18,0.82));
+    --gold:#e8b44a; --gold-hi:#ffe8ad; --snow:#f3ead8; --pine:#1f4d3a;
     box-sizing:border-box; padding-top:env(safe-area-inset-top,0px); padding-bottom:env(safe-area-inset-bottom,0px);
   }
-  html,body{height:100%;margin:0;overflow:hidden;background:var(--bg);font-family:-apple-system,"Hiragino Sans",sans-serif;color:var(--snow);}
+  html,body{height:100%;margin:0;overflow:hidden;background:var(--bg);font-family:'Noto Serif JP',serif;color:var(--snow);}
   canvas{display:block;touch-action:none;}
   #hud{position:fixed;top:env(safe-area-inset-top,0px);left:0;right:0;display:flex;justify-content:space-between;
        align-items:flex-start;padding:14px 18px;pointer-events:none;}
-  #score{background:var(--panel);border:1px solid rgba(232,180,74,0.35);border-radius:10px;padding:10px 16px;
-         font-size:15px;letter-spacing:0.02em;}
-  #score b{color:var(--gold);font-size:20px;}
+  #score{background:linear-gradient(160deg, rgba(28,45,34,0.9), rgba(13,24,18,0.9));
+         border:1px solid rgba(232,180,74,0.5);border-radius:12px;padding:10px 16px;
+         backdrop-filter:blur(6px);font-size:14.5px;letter-spacing:0.02em;box-shadow:0 6px 16px rgba(0,0,0,0.35);}
+  #score b{color:var(--gold-hi);font-size:20px;}
   #intro{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;
-         gap:18px;background:radial-gradient(circle at 50% 30%,#12203a,var(--bg));text-align:center;padding:24px;z-index:10;}
-  #intro h1{font-size:26px;margin:0;font-weight:600;color:var(--snow);}
-  #intro p{max-width:340px;line-height:1.7;color:#b9c2d0;font-size:14.5px;margin:0;}
-  #btnRow{display:flex;gap:12px;flex-wrap:wrap;justify-content:center;}
-  #enterBtn,#enterARBtn,#enterDesktopBtn{pointer-events:auto;background:var(--gold);color:#241a04;border:none;border-radius:999px;
-            padding:14px 26px;font-size:14.5px;font-weight:600;cursor:pointer;}
-  #enterARBtn,#enterDesktopBtn{background:transparent;color:var(--gold);border:1.5px solid var(--gold);}
+         gap:16px;background:radial-gradient(ellipse at 50% 20%,#1c3326 0%,var(--bg) 65%);text-align:center;padding:24px;z-index:10;
+         overflow-y:auto;}
+  #intro h1{font-family:'Cormorant Garamond',serif;font-size:32px;margin:0;font-weight:600;letter-spacing:0.02em;
+            background:linear-gradient(180deg,#fff3d6,var(--gold) 70%);-webkit-background-clip:text;background-clip:text;color:transparent;}
+  #intro .sub{margin:0;color:#c9d9c9;font-size:13.5px;letter-spacing:0.04em;}
+  #intro p{max-width:340px;line-height:1.7;color:#c9d9c9;font-size:14px;margin:0;}
+  .glow{position:absolute;border-radius:50%;filter:blur(2px);opacity:0.55;pointer-events:none;
+        background:radial-gradient(circle, #ffd98a 0%, rgba(255,217,138,0) 70%);}
+  .snow{position:absolute;top:-10px;border-radius:50%;background:#fff;opacity:0.65;pointer-events:none;
+        animation:fall linear infinite;}
+  @keyframes fall{ to{ transform:translateY(110vh); } }
+  .frame{position:relative;z-index:2;width:min(340px,82vw);border-radius:20px;
+         border:1px solid rgba(232,180,74,0.45);
+         background:linear-gradient(160deg, rgba(28,45,34,0.75), rgba(13,24,18,0.75));
+         backdrop-filter:blur(6px);padding:20px 18px 24px;
+         box-shadow:0 0 0 1px rgba(232,180,74,0.08), 0 20px 50px rgba(0,0,0,0.45);
+         display:flex;flex-direction:column;align-items:center;gap:14px;}
+  #btnRow{display:flex;flex-direction:column;gap:10px;width:min(300px,80vw);}
+  #enterBtn,#enterARBtn,#enterDesktopBtn{pointer-events:auto;border:none;border-radius:999px;
+            padding:14px 26px;font-size:14.5px;font-weight:700;cursor:pointer;font-family:'Noto Serif JP',serif;letter-spacing:0.02em;}
+  #enterBtn{color:#2a1c04;background:linear-gradient(180deg,var(--gold-hi),var(--gold) 55%,#c9932c);
+            box-shadow:0 4px 14px rgba(232,180,74,0.35), inset 0 1px 0 rgba(255,255,255,0.5);}
+  #enterARBtn,#enterDesktopBtn{background:rgba(255,255,255,0.04);color:var(--snow);border:1px solid rgba(232,180,74,0.55);}
   #enterBtn:active,#enterARBtn:active,#enterDesktopBtn:active{transform:scale(0.97);}
-  #note{font-size:12.5px;color:#7f8ba0;max-width:300px;}
+  #note{font-size:12px;color:#8fa08f;max-width:300px;line-height:1.7;}
   #shapePicker,#colorPicker{position:fixed;left:0;right:0;bottom:calc(22px + env(safe-area-inset-bottom,0px));display:none;
                gap:12px;justify-content:center;pointer-events:auto;z-index:6;flex-wrap:wrap;padding:0 16px;}
-  .swatch{width:44px;height:44px;border-radius:50%;border:3px solid rgba(255,255,255,0.75);cursor:pointer;}
+  .swatch{width:48px;height:48px;border-radius:50%;border:none;cursor:pointer;
+          box-shadow:inset -4px -4px 8px rgba(0,0,0,0.35), inset 3px 3px 6px rgba(255,255,255,0.3), 0 3px 8px rgba(0,0,0,0.4);}
   .swatch:active{transform:scale(0.88);}
-  .shapeSwatch{background:#fff;color:#2a1c40;font-size:20px;display:flex;align-items:center;justify-content:center;}
+  .shapeSwatch{background:radial-gradient(circle at 35% 30%,#2d4536,#13241a 70%);color:var(--gold-hi);
+               font-size:20px;display:flex;align-items:center;justify-content:center;
+               border:1px solid rgba(232,180,74,0.5)!important;box-shadow:0 3px 10px rgba(0,0,0,0.4)!important;}
   #hint{position:fixed;left:0;right:0;bottom:calc(22px + env(safe-area-inset-bottom,0px));text-align:center;
-        font-size:13px;color:#b9c2d0;pointer-events:none;z-index:4;}
-  #placePanel{position:fixed;left:0;right:0;bottom:calc(22px + env(safe-area-inset-bottom,0px));display:none;
-              flex-direction:column;align-items:center;gap:10px;pointer-events:auto;z-index:6;padding:0 24px;}
-  #placePanel p{margin:0;font-size:13px;color:#b9c2d0;}
+        font-size:13px;color:#c9d9c9;pointer-events:none;z-index:4;}
+  #placePanel{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(22px + env(safe-area-inset-bottom,0px));display:none;
+              flex-direction:column;align-items:center;gap:10px;pointer-events:auto;z-index:6;padding:16px 24px 20px;
+              width:min(340px,82vw);border-radius:20px;border:1px solid rgba(232,180,74,0.45);
+              background:linear-gradient(160deg, rgba(28,45,34,0.82), rgba(13,24,18,0.82));
+              backdrop-filter:blur(6px);box-shadow:0 0 0 1px rgba(232,180,74,0.08), 0 20px 50px rgba(0,0,0,0.45);}
+  #placePanel p{margin:0;font-size:12.5px;color:#c9d9c9;text-align:center;}
   #sizeSlider{width:min(280px,80vw);}
-  #placeConfirmBtn{background:var(--gold);color:#241a04;border:none;border-radius:999px;padding:12px 30px;
-                    font-size:14.5px;font-weight:600;cursor:pointer;}
+  #placeConfirmBtn{color:#2a1c04;background:linear-gradient(180deg,var(--gold-hi),var(--gold) 55%,#c9932c);
+                    border:none;border-radius:999px;padding:12px 30px;font-family:'Noto Serif JP',serif;
+                    font-size:14.5px;font-weight:700;cursor:pointer;box-shadow:0 4px 14px rgba(232,180,74,0.35);}
 </style>
 </head>
 <body>
@@ -54,14 +80,56 @@
   <button id="placeConfirmBtn">ここに固定する</button>
 </div>
 <div id="intro">
+  <div class="glow" style="width:260px;height:260px;top:-60px;left:-60px;"></div>
+  <div class="glow" style="width:200px;height:200px;bottom:40px;right:-40px;"></div>
+  <div class="snow" style="width:3px;height:3px;left:12%;animation-duration:9s;animation-delay:0s;"></div>
+  <div class="snow" style="width:4px;height:4px;left:30%;animation-duration:12s;animation-delay:2s;"></div>
+  <div class="snow" style="width:2px;height:2px;left:55%;animation-duration:8s;animation-delay:1s;"></div>
+  <div class="snow" style="width:3px;height:3px;left:70%;animation-duration:11s;animation-delay:3s;"></div>
+  <div class="snow" style="width:4px;height:4px;left:85%;animation-duration:10s;animation-delay:0.5s;"></div>
+
   <h1>🎄 ツリー・デコレーター</h1>
-  <p>画面をタップして飾りを出し、形と色を選んでツリーに投げよう。</p>
-  <div id="btnRow">
-    <button id="enterBtn">Meta Questで始める(VR)</button>
-    <button id="enterARBtn">ARで始める(スマホ/Quest)</button>
-    <button id="enterDesktopBtn">ブラウザで始める</button>
+  <p class="sub">— A Golden Christmas —</p>
+
+  <svg width="150" height="177" viewBox="0 0 220 260" style="position:relative;z-index:2;">
+    <defs>
+      <radialGradient id="layerG" cx="40%" cy="25%" r="80%">
+        <stop offset="0%" stop-color="#3f7a52"/>
+        <stop offset="55%" stop-color="#1f4d34"/>
+        <stop offset="100%" stop-color="#0f2b1d"/>
+      </radialGradient>
+      <linearGradient id="trunkG" x1="0" y1="0" x2="1" y2="0">
+        <stop offset="0%" stop-color="#6b4323"/>
+        <stop offset="100%" stop-color="#3a2512"/>
+      </linearGradient>
+    </defs>
+    <rect x="100" y="228" width="20" height="26" rx="3" fill="url(#trunkG)"/>
+    <polygon points="110,30 170,120 50,120" fill="url(#layerG)"/>
+    <polygon points="110,75 182,165 38,165" fill="url(#layerG)"/>
+    <polygon points="110,122 196,228 24,228" fill="url(#layerG)"/>
+    <path d="M40,210 Q110,230 190,190" stroke="#e8b44a" stroke-width="2.2" fill="none" opacity="0.85"/>
+    <path d="M50,160 Q110,180 178,150" stroke="#e8b44a" stroke-width="2.2" fill="none" opacity="0.85"/>
+    <path d="M62,112 Q110,128 166,100" stroke="#e8b44a" stroke-width="2.2" fill="none" opacity="0.85"/>
+    <polygon points="110,6 118,24 137,24 121,35 127,54 110,42 93,54 99,35 83,24 102,24"
+             fill="#ffe8ad" style="filter:drop-shadow(0 0 8px #ffcf66)"/>
+    <circle cx="78" cy="150" r="8" fill="#e8b44a" style="filter:drop-shadow(0 2px 4px rgba(0,0,0,0.4))"/>
+    <circle cx="140" cy="140" r="7" fill="#c0392b" style="filter:drop-shadow(0 2px 4px rgba(0,0,0,0.4))"/>
+    <circle cx="60" cy="195" r="8" fill="#2a5fb0" style="filter:drop-shadow(0 2px 4px rgba(0,0,0,0.4))"/>
+    <circle cx="150" cy="200" r="9" fill="#1f8a5c" style="filter:drop-shadow(0 2px 4px rgba(0,0,0,0.4))"/>
+    <circle cx="110" cy="175" r="7" fill="#e8b44a" style="filter:drop-shadow(0 2px 4px rgba(0,0,0,0.4))"/>
+    <circle cx="95" cy="110" r="6" fill="#c0392b" style="filter:drop-shadow(0 2px 4px rgba(0,0,0,0.4))"/>
+    <circle cx="130" cy="95" r="6" fill="#e8b44a" style="filter:drop-shadow(0 2px 4px rgba(0,0,0,0.4))"/>
+  </svg>
+
+  <div class="frame">
+    <p>画面をタップして飾りを出し、形と色を選んでツリーに投げよう。</p>
+    <div id="btnRow">
+      <button id="enterBtn">Meta Questで始める(VR)</button>
+      <button id="enterARBtn">ARで始める(スマホ/Quest)</button>
+      <button id="enterDesktopBtn">ブラウザで始める</button>
+    </div>
+    <p id="note">タップ/トリガーで飾りを出現 → 形を選ぶ → 色を選ぶ → もう一度つかんでドラッグ、離すと投げられます。<br>AR: リングの大きさがそのままツリーの大きさに(飾りの大きさも連動)。スライダーで調整して固定しよう。</p>
   </div>
-  <p id="note">タップ/トリガーで飾りを出現 → 形を選ぶ → 色を選ぶ → もう一度つかんでドラッグ、離すと投げられます。<br>AR: リングの大きさがそのままツリーの大きさに(飾りの大きさも連動)。スライダーで調整して固定しよう。</p>
 </div>
 
 <script type="importmap">
@@ -75,8 +143,8 @@ const BASE_ORN_RADIUS = 0.14; // ornament size at treeScale = 1
 let score = 0;
 
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x0a0e1a);
-scene.fog = new THREE.Fog(0x0a0e1a, 8, 26);
+scene.background = new THREE.Color(0x15261c);
+scene.fog = new THREE.Fog(0x1c3326, 10, 32);
 
 const camera = new THREE.PerspectiveCamera(60, innerWidth/innerHeight, 0.05, 100);
 camera.position.set(0, 1.6, 4);
@@ -88,48 +156,74 @@ renderer.setSize(innerWidth, innerHeight);
 renderer.xr.enabled = true;
 document.body.appendChild(renderer.domElement);
 
-scene.add(new THREE.HemisphereLight(0x3a4a66, 0x11150c, 0.9));
-const key = new THREE.DirectionalLight(0xfff2d0, 0.9);
+scene.add(new THREE.HemisphereLight(0xe8c98a, 0x1c3326, 1.2));
+const key = new THREE.DirectionalLight(0xffdfa0, 1.5);
 key.position.set(3, 6, 2);
 scene.add(key);
+const fill = new THREE.DirectionalLight(0xffcf7a, 0.45);
+fill.position.set(-4, 3, -2);
+scene.add(fill);
+scene.add(new THREE.AmbientLight(0xffe9c2, 0.3));
 
 // ground
 const ground = new THREE.Mesh(
   new THREE.CircleGeometry(20, 48),
-  new THREE.MeshStandardMaterial({ color:0x101a14, roughness:1 })
+  new THREE.MeshStandardMaterial({ color:0x18301f, roughness:0.95 })
 );
 ground.rotation.x = -Math.PI/2;
 scene.add(ground);
 
-// tree: stacked cones
+// tree: stacked cones with a rich, deepening green gradient + gold ribbon + baubles
 const treeGroup = new THREE.Group();
 treeGroup.position.set(TREE.baseX, TREE.baseY, TREE.baseZ);
 scene.add(treeGroup);
 const trunk = new THREE.Mesh(
   new THREE.CylinderGeometry(0.6, 0.9, 1.4, 14),
-  new THREE.MeshStandardMaterial({ color:0x4a3220, roughness:0.9 })
+  new THREE.MeshStandardMaterial({ color:0x4a3220, roughness:0.85 })
 );
 trunk.position.y = 0.7;
 treeGroup.add(trunk);
+const goldMat = new THREE.MeshStandardMaterial({ color:0xe8b44a, emissive:0x4a3410, roughness:0.25, metalness:0.75 });
 const layers = 7;
+const colTop = new THREE.Color(0x0f2b1d), colBottom = new THREE.Color(0x3f7a52);
 for (let i=0; i<layers; i++){
   const t = i/(layers-1);
   const y = 1.4 + t*(TREE.height-1.4);
   const r = TREE.baseRadius*(1 - t*0.85);
   const h = (TREE.height-1.4)/layers*1.6;
+  const layerColor = colBottom.clone().lerp(colTop, t);
   const cone = new THREE.Mesh(
     new THREE.ConeGeometry(r, h, 20),
-    new THREE.MeshStandardMaterial({ color:0x1f4d3a, roughness:0.85 })
+    new THREE.MeshStandardMaterial({ color:layerColor, roughness:0.8 })
   );
   cone.position.y = y + h*0.3;
   treeGroup.add(cone);
+  if (i < layers-1){
+    const ribbon = new THREE.Mesh(new THREE.TorusGeometry(r*0.92, r*0.035, 8, 32), goldMat);
+    ribbon.position.y = cone.position.y - h*0.08;
+    ribbon.rotation.x = Math.PI/2;
+    treeGroup.add(ribbon);
+  }
+  for (let b=0; b<3; b++){
+    const ang = Math.random()*Math.PI*2;
+    const br = r * (0.5+Math.random()*0.4);
+    const bauble = new THREE.Mesh(
+      new THREE.SphereGeometry(TREE.baseRadius*0.045, 12, 12),
+      new THREE.MeshStandardMaterial({ color: Math.random()<0.5?0xc0392b:0xe8b44a, roughness:0.2, metalness:0.6 })
+    );
+    bauble.position.set(Math.cos(ang)*br, cone.position.y - h*0.1, Math.sin(ang)*br);
+    treeGroup.add(bauble);
+  }
 }
 const star = new THREE.Mesh(
   new THREE.OctahedronGeometry(0.28, 0),
-  new THREE.MeshStandardMaterial({ color:0xf4d35e, emissive:0x8a6a10, roughness:0.4 })
+  new THREE.MeshStandardMaterial({ color:0xffe8ad, emissive:0xc9932c, emissiveIntensity:0.6, roughness:0.2, metalness:0.6 })
 );
 star.position.y = TREE.height + 0.1;
 treeGroup.add(star);
+const starLight = new THREE.PointLight(0xffd98a, 1.2, 5);
+starLight.position.set(0, TREE.height+0.1, 0);
+treeGroup.add(starLight);
 
 function updateHUD(){
   document.getElementById('scoreVal').textContent = score;
@@ -161,7 +255,8 @@ const pickerDiv = document.getElementById('colorPicker');
 colors.forEach(c=>{
   const b = document.createElement('button');
   b.className = 'swatch';
-  b.style.background = '#'+c.toString(16).padStart(6,'0');
+  const hex = '#'+c.toString(16).padStart(6,'0');
+  b.style.background = `radial-gradient(circle at 35% 30%, #fff7e0, ${hex} 55%, #000 130%)`;
   b.addEventListener('click', ()=>chooseColor(c));
   pickerDiv.appendChild(b);
 });
@@ -192,7 +287,7 @@ function computeHandAnchor(){
 function spawnOrnament(){
   if (activeOrnament) return;
   const r = ornRadius();
-  const mat = new THREE.MeshStandardMaterial({ color:0xdddddd, roughness:0.25, metalness:0.4 });
+  const mat = new THREE.MeshStandardMaterial({ color:0xe8c98a, roughness:0.18, metalness:0.65 });
   const m = new THREE.Mesh(shapes.ball.build(r), mat);
   m.position.copy(computeHandAnchor());
   m.userData = { held:false, stuck:false, floating:true, velocity:new THREE.Vector3(), history:[], settleTimer:0, radius:r };
